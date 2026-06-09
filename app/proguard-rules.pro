@@ -1,0 +1,2 @@
+-keep class com.arthenica.ffmpegkit.** { *; }
+-keep class com.shohan.mediabridge.db.** { *; }
