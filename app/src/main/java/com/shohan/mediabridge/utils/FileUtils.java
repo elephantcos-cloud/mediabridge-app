@@ -5,12 +5,10 @@ import android.provider.OpenableColumns;import android.webkit.MimeTypeMap;
 import java.io.*;import java.text.SimpleDateFormat;import java.util.*;
 public class FileUtils {
     public static File getOutputDir(Context ctx){
-        File dir;
-        if(android.os.Build.VERSION.SDK_INT>=android.os.Build.VERSION_CODES.Q)
-            dir=new File(ctx.getExternalFilesDir(null),"Converted");
-        else dir=new File(Environment.getExternalStoragePublicDirectory(
+        File dir=new File(Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_DOWNLOADS),"MediaBridge");
-        if(!dir.exists())dir.mkdirs(); return dir;}
+        if(!dir.exists())dir.mkdirs();
+        return dir;}
 
     public static String getMime(Context ctx,Uri uri){
         if(ContentResolver.SCHEME_CONTENT.equals(uri.getScheme()))
