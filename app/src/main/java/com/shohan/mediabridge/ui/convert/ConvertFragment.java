@@ -1,4 +1,5 @@
 package com.shohan.mediabridge.ui.convert;
+
 import android.app.Activity;import android.content.Intent;import android.net.Uri;
 import android.os.Bundle;import android.os.Handler;import android.os.Looper;
 import android.view.*;import android.widget.*;
@@ -47,23 +48,23 @@ public class ConvertFragment extends Fragment {
 
     private void handleUri(Uri uri){
         b.btnConvert.setEnabled(false); b.cardFileInfo.setVisibility(View.GONE);
-        b.tvStatus.setText("Loading file\u2026");
+        b.tvStatus.setText("Loading file...");
         pool.execute(()->{
             String path=FileUtils.copyToCache(requireContext(),uri);
             String mime=FileUtils.getMime(requireContext(),uri);
             if(mime==null&&path!=null){
                 String e=FileUtils.ext(new File(path).getName());
-                if(e.matches("mp4|avi|mkv|mov|3gp|wmv|flv"))mime="video/mp4";
+                if(e.matches("mp4|avi|mkv|mov|3gp|wmv|flv|webm"))mime="video/mp4";
                 else if(e.matches("mp3|aac|wav|ogg|flac|amr|m4a"))mime="audio/mpeg";
                 else if(e.matches("jpg|jpeg|png|bmp|gif|webp"))mime="image/jpeg";
             }
-            String fp=path, fm=(mime!=null?mime:"");
+            String fp=path,fm=(mime!=null?mime:"");
             ui.post(()->{
                 if(fp==null){b.tvStatus.setText("Failed to load file.");return;}
                 cachedPath=fp; currentMime=fm;
                 String name=FileUtils.nameFromUri(requireContext(),uri);
                 b.tvFileName.setText(name);
-                b.tvFileInfo.setText(FileUtils.fmtSize(new File(fp).length())+"  \u2022  "+FileUtils.typeFrom(fm));
+                b.tvFileInfo.setText(FileUtils.fmtSize(new File(fp).length())+"  -  "+FileUtils.typeFrom(fm));
                 b.cardFileInfo.setVisibility(View.VISIBLE);
                 updateSpinner(FileUtils.typeFrom(fm));
                 b.btnConvert.setEnabled(true);
@@ -76,15 +77,14 @@ public class ConvertFragment extends Fragment {
         String[] opts;
         switch(type){
             case "VIDEO": opts=new String[]{
-                ConversionManager.VideoFormat.FMT_3GP_176x144.label,
-                ConversionManager.VideoFormat.FMT_MP4_320x240.label,
-                ConversionManager.VideoFormat.FMT_AVI_320x240.label}; break;
+                ConversionManager.VideoFormat.FMT_176x144.label,
+                ConversionManager.VideoFormat.FMT_320x240.label,
+                ConversionManager.VideoFormat.FMT_480x360.label}; break;
             case "AUDIO": opts=new String[]{
-                ConversionManager.AudioFormat.FMT_AMR_NB.label,
-                ConversionManager.AudioFormat.FMT_MP3_64K.label,
-                ConversionManager.AudioFormat.FMT_MP3_128K.label,
+                ConversionManager.AudioFormat.FMT_AAC_32K.label,
                 ConversionManager.AudioFormat.FMT_AAC_64K.label,
-                ConversionManager.AudioFormat.FMT_WAV.label}; break;
+                ConversionManager.AudioFormat.FMT_AAC_128K.label,
+                ConversionManager.AudioFormat.FMT_AUDIO_ONLY.label}; break;
             case "IMAGE": opts=new String[]{
                 ConversionManager.ImageFormat.FMT_128x160.label,
                 ConversionManager.ImageFormat.FMT_176x220.label,
@@ -102,11 +102,11 @@ public class ConvertFragment extends Fragment {
     private void convert(){
         if(cachedPath==null||converting)return;
         converting=true;
-        b.btnConvert.setEnabled(false);b.btnCancel.setVisibility(View.VISIBLE);
+        b.btnConvert.setEnabled(false); b.btnCancel.setVisibility(View.VISIBLE);
         b.progressGroup.setVisibility(View.VISIBLE);
         b.progressBar.setIndeterminate(true);
-        b.tvStatus.setText("Converting\u2026 Please wait.");
-        b.tvElapsed.setText("Elapsed: 0:00");
+        b.tvStatus.setText("Converting... Please wait.");
+        b.tvElapsed.setText("Processing...");
         String outDir=FileUtils.getOutputDir(requireContext()).getAbsolutePath();
         String type=FileUtils.typeFrom(currentMime);
         int sel=b.spinnerFormat.getSelectedItemPosition();
@@ -116,18 +116,23 @@ public class ConvertFragment extends Fragment {
             @Override public void onFailure(String e){ui.post(()->fail(e));}
         };
         switch(type){
-            case "VIDEO":ConversionManager.convertVideo(cachedPath,outDir,ConversionManager.VideoFormat.values()[sel],cb);break;
-            case "AUDIO":ConversionManager.convertAudio(cachedPath,outDir,ConversionManager.AudioFormat.values()[sel],cb);break;
-            case "IMAGE":ConversionManager.convertImage(cachedPath,outDir,ConversionManager.ImageFormat.values()[sel],cb);break;
-            default:fail("Unknown media type");
+            case "VIDEO":
+                ConversionManager.convertVideo(requireContext(),cachedPath,outDir,
+                    ConversionManager.VideoFormat.values()[sel],cb); break;
+            case "AUDIO":
+                ConversionManager.convertAudio(requireContext(),cachedPath,outDir,
+                    ConversionManager.AudioFormat.values()[sel],cb); break;
+            case "IMAGE":
+                ConversionManager.convertImage(cachedPath,outDir,
+                    ConversionManager.ImageFormat.values()[sel],cb); break;
+            default: fail("Unknown media type");
         }
     }
 
     private void done(String path,long size){
-        converting=false;
-        b.btnConvert.setEnabled(true);b.btnCancel.setVisibility(View.GONE);
-        b.progressBar.setIndeterminate(false);b.progressBar.setProgress(100);
-        b.tvStatus.setText("\u2705 Done!\n"+path);
+        converting=false; b.btnConvert.setEnabled(true); b.btnCancel.setVisibility(View.GONE);
+        b.progressBar.setIndeterminate(false); b.progressBar.setProgress(100);
+        b.tvStatus.setText("Done! Saved: "+path);
         b.tvElapsed.setText("Output size: "+FileUtils.fmtSize(size));
         String name=(cachedPath!=null)?new File(cachedPath).getName():"file";
         String fmt=(String)b.spinnerFormat.getSelectedItem();
@@ -138,13 +143,13 @@ public class ConvertFragment extends Fragment {
     }
 
     private void fail(String err){
-        converting=false;b.btnConvert.setEnabled(true);b.btnCancel.setVisibility(View.GONE);
-        b.progressBar.setIndeterminate(false);
-        b.tvStatus.setText("\u274c Failed: "+err);}
+        converting=false; b.btnConvert.setEnabled(true); b.btnCancel.setVisibility(View.GONE);
+        b.progressBar.setIndeterminate(false); b.tvStatus.setText("Failed: "+err);}
 
-    private void cancel(){ConversionManager.cancelAll();converting=false;
-        b.btnConvert.setEnabled(true);b.btnCancel.setVisibility(View.GONE);
-        b.progressBar.setIndeterminate(false);b.tvStatus.setText("Cancelled.");}
+    private void cancel(){
+        ConversionManager.cancelAll(); converting=false;
+        b.btnConvert.setEnabled(true); b.btnCancel.setVisibility(View.GONE);
+        b.progressBar.setIndeterminate(false); b.tvStatus.setText("Cancelled.");}
 
     @Override public void onDestroyView(){super.onDestroyView();b=null;}
 }
