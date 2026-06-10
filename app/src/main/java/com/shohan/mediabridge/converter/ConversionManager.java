@@ -67,7 +67,17 @@ public class ConversionManager {
                     cb.onFailure(e.getMessage()!=null?e.getMessage():"Video conversion failed");}
                 @Override public void onFallbackApplied(Composition c,TransformationRequest o,TransformationRequest f){}
             }).build();
-        t.setProgressUpdateListener(100, percent -> cb.onProgress(percent, percent + "%"));
+        android.os.Handler h=new android.os.Handler(android.os.Looper.getMainLooper());
+        androidx.media3.transformer.ProgressHolder ph=new androidx.media3.transformer.ProgressHolder();
+        Runnable poll=new Runnable(){@Override public void run(){
+            if(activeTransformer!=null){
+                int state=t.getProgress(ph);
+                if(ph.progress>=0) cb.onProgress(ph.progress, ph.progress+"%");
+                if(state!=androidx.media3.transformer.Transformer.PROGRESS_STATE_NOT_STARTED)
+                    h.postDelayed(this,100);
+            }
+        }};
+        h.postDelayed(poll,100);
         activeTransformer=t;
         EditedMediaItem.Builder ib=new EditedMediaItem.Builder(
             MediaItem.fromUri(Uri.fromFile(new java.io.File(in))));
