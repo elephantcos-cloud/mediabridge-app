@@ -65,7 +65,9 @@ public class ConversionManager {
                     cb.onSuccess(out,new java.io.File(out).length());}
                 @Override public void onError(Composition c,ExportResult r,ExportException e){
                     cb.onFailure(e.getMessage()!=null?e.getMessage():"Video conversion failed");}
+                @Override public void onFallbackApplied(Composition c,TransformationRequest o,TransformationRequest f){}
             }).build();
+        t.setProgressUpdateListener(100, percent -> cb.onProgress(percent, percent + "%"));
         activeTransformer=t;
         EditedMediaItem.Builder ib=new EditedMediaItem.Builder(
             MediaItem.fromUri(Uri.fromFile(new java.io.File(in))));
