@@ -7,14 +7,33 @@
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent" android:layout_height="3dp"
         android:indeterminate="true" android:progressTint="@color/accent_purple" android:visibility="gone"/>
-    <com.google.android.material.tabs.TabLayout
-        android:id="@+id/tab_layout"
-        android:layout_width="match_parent" android:layout_height="48dp"
-        android:background="@color/surface"
-        app:tabIndicatorColor="@color/accent_purple"
-        app:tabSelectedTextColor="@color/accent_purple"
-        app:tabTextColor="@color/text_secondary" app:tabMode="fixed"/>
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/view_pager"
-        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:scrollbars="none" android:background="@color/surface">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="48dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="12dp">
+            <TextView android:id="@+id/chip_all" android:layout_width="wrap_content" android:layout_height="32dp"
+                android:text="All" android:gravity="center" android:paddingHorizontal="16dp"
+                android:textSize="13sp" android:textColor="@color/text_primary" android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_chip" android:selected="true"/>
+            <TextView android:id="@+id/chip_video" android:layout_width="wrap_content" android:layout_height="32dp"
+                android:text="Video" android:gravity="center" android:paddingHorizontal="16dp"
+                android:textSize="13sp" android:textColor="@color/text_primary" android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_chip"/>
+            <TextView android:id="@+id/chip_audio" android:layout_width="wrap_content" android:layout_height="32dp"
+                android:text="Audio" android:gravity="center" android:paddingHorizontal="16dp"
+                android:textSize="13sp" android:textColor="@color/text_primary" android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_chip"/>
+            <TextView android:id="@+id/chip_image" android:layout_width="wrap_content" android:layout_height="32dp"
+                android:text="Image" android:gravity="center" android:paddingHorizontal="16dp"
+                android:textSize="13sp" android:textColor="@color/text_primary"
+                android:background="@drawable/bg_chip"/>
+        </LinearLayout>
+    </HorizontalScrollView>
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:paddingBottom="80dp" android:clipToPadding="false"/>
+    <androidx.viewpager2.widget.ViewPager2 android:id="@+id/view_pager"
+        android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+    <com.google.android.material.tabs.TabLayout android:id="@+id/tab_layout"
+        android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
 </LinearLayout>
