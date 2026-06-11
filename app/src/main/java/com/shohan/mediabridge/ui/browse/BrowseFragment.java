@@ -38,7 +38,7 @@ public class BrowseFragment extends Fragment {
             loaded.addAll(scan(ctx,"video"));loaded.addAll(scan(ctx,"audio"));loaded.addAll(scan(ctx,"image"));
             loaded.sort((a,x)->Long.compare(x.getDateAdded(),a.getDateAdded()));
             ui.post(()->{if(b==null)return;allItems.clear();allItems.addAll(loaded);
-                b.progressBar.setVisibility(android.view.View.GONE);applyFilter(filter);});});}
+                b.progressBar.setVisibility(android.view.View.GONE);applyFilter(filter);});}); }
     private void applyFilter(int type){
         filter=type;if(b==null)return;
         List<MediaItem> f=(type==-1)?new ArrayList<>(allItems):
@@ -46,7 +46,12 @@ public class BrowseFragment extends Fragment {
         adapter.setItems(f);
         b.chipAll.setSelected(type==-1);b.chipVideo.setSelected(type==0);
         b.chipAudio.setSelected(type==1);b.chipImage.setSelected(type==2);}
-    private void openItem(MediaItem item){
+    public List<MediaItem> getItemsForTab(int tab){
+        if(tab==0)return allItems.stream().filter(i->i.getType()==MediaItem.TYPE_VIDEO).collect(Collectors.toList());
+        if(tab==1)return allItems.stream().filter(i->i.getType()==MediaItem.TYPE_AUDIO).collect(Collectors.toList());
+        if(tab==2)return allItems.stream().filter(i->i.getType()==MediaItem.TYPE_IMAGE).collect(Collectors.toList());
+        return new ArrayList<>(allItems);}
+    public void openItem(MediaItem item){
         if(!isAdded())return;
         Intent intent;
         if(item.getType()==MediaItem.TYPE_VIDEO)intent=new Intent(requireContext(),VideoPlayerActivity.class);

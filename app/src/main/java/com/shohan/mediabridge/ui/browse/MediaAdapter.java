@@ -9,6 +9,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.VH> {
     public interface Click{void onClick(MediaItem item);}
     private final Context ctx; private final List<MediaItem> items; private final Click click;
     public MediaAdapter(Context c,List<MediaItem> i,Click cl){ctx=c;items=i;click=cl;}
+    public void setItems(List<MediaItem> newItems){
+        items.clear();items.addAll(newItems);notifyDataSetChanged();}
     @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p,int t){
         return new VH(LayoutInflater.from(ctx).inflate(R.layout.item_media,p,false));}
     @Override public void onBindViewHolder(@NonNull VH h,int pos){
