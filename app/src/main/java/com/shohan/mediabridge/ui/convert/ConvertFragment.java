@@ -1,18 +1,33 @@
 package com.shohan.mediabridge.ui.convert;
-import android.app.Activity;import android.app.NotificationChannel;
-import android.app.NotificationManager;import android.content.Context;
-import android.content.Intent;import android.net.Uri;import android.os.Build;
-import android.os.Bundle;import android.os.Handler;import android.os.Looper;
-import android.view.*;import android.widget.*;
-import androidx.activity.result.*;import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.*;import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;import androidx.fragment.app.Fragment;
+import android.app.AlertDialog;
+import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.*;
+import android.widget.*;
+import androidx.activity.result.*;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.*;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
-import com.shohan.mediabridge.R;import com.shohan.mediabridge.converter.ConversionManager;
+import com.shohan.mediabridge.R;
+import com.shohan.mediabridge.converter.ConversionManager;
 import com.shohan.mediabridge.databinding.FragmentConvertBinding;
-import com.shohan.mediabridge.db.*;import com.shohan.mediabridge.model.ConversionTask;
+import com.shohan.mediabridge.db.*;
+import com.shohan.mediabridge.model.ConversionTask;
 import com.shohan.mediabridge.utils.FileUtils;
-import java.io.File;import java.util.*;import java.util.concurrent.*;
+import java.io.File;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 public class ConvertFragment extends Fragment {
     private FragmentConvertBinding b;
@@ -40,14 +55,12 @@ public class ConvertFragment extends Fragment {
         b.queueRecycler.setAdapter(queueAdapter);
         b.btnPickFile.setOnClickListener(x->pick());
         b.btnClearDone.setOnClickListener(x->clearDone());
-        refresh();
-    }
+        refresh();}
     private void pick(){
         Intent i=new Intent(Intent.ACTION_GET_CONTENT);i.setType("*/*");
         i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"video/*","audio/*","image/*"});
         i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);i.addCategory(Intent.CATEGORY_OPENABLE);
-        picker.launch(Intent.createChooser(i,"Select files"));
-    }
+        picker.launch(Intent.createChooser(i,"Select files"));}
     private void enqueue(Uri uri){
         final Context ctx=requireContext().getApplicationContext();
         pool.execute(()->{
@@ -60,17 +73,31 @@ public class ConvertFragment extends Fragment {
                 else mime="";}
             String type=FileUtils.typeFrom(mime);if("UNKNOWN".equals(type))return;
             String outDir=FileUtils.getOutputDir(ctx).getAbsolutePath();
-            int fi;String fl;
-            switch(type){
-                case "VIDEO":fl=ConversionManager.VideoFormat.FMT_320x240.label;fi=1;break;
-                case "AUDIO":fl=ConversionManager.AudioFormat.FMT_AAC_64K.label;fi=1;break;
-                default:fl=ConversionManager.ImageFormat.FMT_240x320.label;fi=2;break;}
-            ConversionTask task=new ConversionTask(ids.incrementAndGet(),path,outDir,type,fl,fi);
-            ui.post(()->{tasks.add(task);
+            String fileName=new File(path).getName();
+            ui.post(()->showFormatPicker(path,type,outDir,fileName,ctx));});}
+    private void showFormatPicker(String path,String type,String outDir,String fileName,Context ctx){
+        if(!isAdded())return;
+        String[] items;
+        if("VIDEO".equals(type)){
+            ConversionManager.VideoFormat[] fmts=ConversionManager.VideoFormat.values();
+            items=new String[fmts.length];for(int i=0;i<fmts.length;i++)items[i]=fmts[i].label;
+        }else if("AUDIO".equals(type)){
+            ConversionManager.AudioFormat[] fmts=ConversionManager.AudioFormat.values();
+            items=new String[fmts.length];for(int i=0;i<fmts.length;i++)items[i]=fmts[i].label;
+        }else{
+            ConversionManager.ImageFormat[] fmts=ConversionManager.ImageFormat.values();
+            items=new String[fmts.length];for(int i=0;i<fmts.length;i++)items[i]=fmts[i].label;}
+        final int[] sel={0};
+        new AlertDialog.Builder(requireContext())
+            .setTitle("Format: "+fileName)
+            .setSingleChoiceItems(items,0,(d,which)->sel[0]=which)
+            .setPositiveButton("Convert",(d,w)->{
+                int fi=sel[0];String fl=items[fi];
+                ConversionTask task=new ConversionTask(ids.incrementAndGet(),path,outDir,type,fl,fi);
+                tasks.add(task);
                 if(b!=null){queueAdapter.notifyItemInserted(tasks.size()-1);refresh();}
-                startTask(task,ctx);});
-        });
-    }
+                startTask(task,ctx);})
+            .setNegativeButton("Cancel",null).show();}
     private void startTask(ConversionTask task,Context ctx){
         task.status="RUNNING";int nid=BNID+task.id;safeRefresh();
         ConversionManager.Callback cb=new ConversionManager.Callback(){
@@ -89,8 +116,7 @@ public class ConvertFragment extends Fragment {
             case "AUDIO":ConversionManager.convertAudio(ctx,task.inputPath,task.outputDir,
                 ConversionManager.AudioFormat.values()[task.formatIndex],cb);break;
             case "IMAGE":ConversionManager.convertImage(task.inputPath,task.outputDir,
-                ConversionManager.ImageFormat.values()[task.formatIndex],cb);break;}
-    }
+                ConversionManager.ImageFormat.values()[task.formatIndex],cb);break;}}
     private void safeRefresh(){if(b==null)return;queueAdapter.notifyDataSetChanged();refresh();}
     private void refresh(){if(b==null)return;
         long r=tasks.stream().filter(t->"RUNNING".equals(t.status)).count();
