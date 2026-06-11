@@ -24,7 +24,7 @@ public class ConversionManager {
 
     public enum VideoFormat {
         FMT_3GP_176("3GP 176x144 - Button Phone", "3gp", 176, 144, "h263"),
-        FMT_3GP_320("3GP 320x240 - Feature Phone", "3gp", 320, 240, "mpeg4");
+        FMT_3GP_320("3GP 352x288 - Feature Phone", "3gp", 352, 288, "h263");
         public final String label, ext, codec;
         public final int w, h;
         VideoFormat(String l,String e,int w,int h,String c){label=l;ext=e;this.w=w;this.h=h;codec=c;}
