@@ -87,7 +87,6 @@ public class ConversionManager {
                 sessionMap.remove(taskId);
                 ReturnCode rc = s.getReturnCode();
                 // Delete cache input file
-                new File(in).delete();
                 if (ReturnCode.isSuccess(rc)) {
                     cb.onSuccess(out, new File(out).length());
                 } else if (ReturnCode.isCancel(rc)) {
@@ -119,10 +118,8 @@ public class ConversionManager {
                 .setAudioMimeType(MimeTypes.AUDIO_AAC).build())
             .addListener(new Transformer.Listener() {
                 @Override public void onCompleted(Composition c, ExportResult r) {
-                    new File(in).delete();
                     cb.onSuccess(out, new File(out).length()); }
                 @Override public void onError(Composition c, ExportResult r, ExportException e) {
-                    new File(in).delete();
                     cb.onFailure(e.getMessage() != null ? e.getMessage() : "Audio failed"); }
             }).build();
         activeTransformer = t;
@@ -140,16 +137,13 @@ public class ConversionManager {
                 o.inSampleSize = ss(o.outWidth, o.outHeight, fmt.w, fmt.h);
                 o.inJustDecodeBounds = false;
                 Bitmap bmp = BitmapFactory.decodeFile(in, o);
-                if (bmp == null) { new File(in).delete(); cb.onFailure("Cannot decode image"); return; }
                 Bitmap sc = Bitmap.createScaledBitmap(bmp, fmt.w, fmt.h, true); bmp.recycle();
                 try (FileOutputStream fos = new FileOutputStream(out)) {
                     sc.compress(Bitmap.CompressFormat.JPEG, 85, fos);
                 }
                 sc.recycle();
-                new File(in).delete();
                 cb.onSuccess(out, new File(out).length());
             } catch (Exception e) {
-                new File(in).delete();
                 cb.onFailure("Image error: " + e.getMessage());
             }
         }).start();

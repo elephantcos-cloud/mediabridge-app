@@ -3,10 +3,14 @@ import android.app.AlertDialog;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.view.*;
 import androidx.activity.result.*;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -14,7 +18,6 @@ import androidx.annotation.*;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
-import com.shohan.mediabridge.R;
 import com.shohan.mediabridge.converter.ConversionManager;
 import com.shohan.mediabridge.databinding.FragmentConvertBinding;
 import com.shohan.mediabridge.db.*;
@@ -22,6 +25,7 @@ import com.shohan.mediabridge.model.ConversionTask;
 import com.shohan.mediabridge.service.ConversionService;
 import com.shohan.mediabridge.utils.FileUtils;
 import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,18 +37,16 @@ public class ConvertFragment extends Fragment {
     private static final AtomicInteger ids = new AtomicInteger(0);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    private final Map<Integer, ParcelFileDescriptor> pfdMap = new ConcurrentHashMap<>();
     private boolean pollerRunning = false;
 
-    // Real-time UI refresh every 300ms while converting
     private final Runnable progressPoller = new Runnable() {
         @Override public void run() {
             boolean anyRunning = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
             if (anyRunning && b != null) {
                 queueAdapter.notifyDataSetChanged();
                 ui.postDelayed(this, 300);
-            } else {
-                pollerRunning = false;
-            }
+            } else { pollerRunning = false; }
         }
     };
 
@@ -67,22 +69,19 @@ public class ConvertFragment extends Fragment {
         queueAdapter.setCancelListener(task -> {
             ConversionManager.cancelTask(task.id);
             task.status = "CANCELLED";
+            closePfd(task.id);
             safeRefresh(); stopServiceIfIdle();
         });
         b.queueRecycler.setLayoutManager(new LinearLayoutManager(requireContext()));
         b.queueRecycler.setAdapter(queueAdapter);
         b.btnPickFile.setOnClickListener(x -> pick());
         b.btnClearDone.setOnClickListener(x -> clearDone());
-        // Resume poller if tasks are still running (e.g. after fragment recreated)
         if (tasks.stream().anyMatch(t -> "RUNNING".equals(t.status))) startPoller();
         refresh();
     }
 
     private void startPoller() {
-        if (!pollerRunning) {
-            pollerRunning = true;
-            ui.postDelayed(progressPoller, 300);
-        }
+        if (!pollerRunning) { pollerRunning = true; ui.postDelayed(progressPoller, 300); }
     }
 
     private void pick() {
@@ -95,24 +94,55 @@ public class ConvertFragment extends Fragment {
     private void enqueue(Uri uri) {
         final Context ctx = requireContext().getApplicationContext();
         pool.execute(() -> {
-            String path = FileUtils.copyToCache(ctx, uri); if (path == null) return;
-            String mime = FileUtils.getMime(ctx, uri);
-            if (mime == null) {
-                String e = FileUtils.ext(new File(path).getName());
+            String fileName = null, mime = null, realPath = null;
+
+            // Query ContentResolver for name, mime, real path
+            try (Cursor c = ctx.getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.DATA}, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    fileName = c.getString(0);
+                    mime     = c.getString(1);
+                    String data = c.getString(2);
+                    if (data != null && new File(data).exists()) realPath = data;
+                }
+            } catch (Exception ignored) {}
+
+            // Fallback mime from extension
+            if (mime == null && fileName != null) {
+                String e = FileUtils.ext(fileName);
                 if (e.matches("mp4|avi|mkv|mov|3gp|wmv|flv|webm")) mime = "video/mp4";
                 else if (e.matches("mp3|aac|wav|ogg|flac|amr|m4a")) mime = "audio/mpeg";
-                else if (e.matches("jpg|jpeg|png|bmp|gif|webp")) mime = "image/jpeg";
+                else if (e.matches("jpg|jpeg|png|bmp|gif|webp"))    mime = "image/jpeg";
                 else mime = "";
             }
-            String type = FileUtils.typeFrom(mime); if ("UNKNOWN".equals(type)) return;
+
+            String type = FileUtils.typeFrom(mime != null ? mime : "");
+            if ("UNKNOWN".equals(type)) return;
             String outDir = FileUtils.getOutputDir(ctx).getAbsolutePath();
-            String fileName = new File(path).getName();
-            ui.post(() -> showFormatPicker(path, type, outDir, fileName, ctx));
+            final String finalName = (fileName != null) ? fileName : "file";
+            final String finalType = type;
+
+            if (realPath != null) {
+                // Best case: use real path directly — no cache, no PFD
+                final String path = realPath;
+                ui.post(() -> showFormatPicker(path, null, finalType, outDir, finalName, ctx));
+            } else {
+                // Fallback: use ParcelFileDescriptor — no cache copy
+                try {
+                    ParcelFileDescriptor pfd = ctx.getContentResolver().openFileDescriptor(uri, "r");
+                    if (pfd == null) return;
+                    String fdPath = "/proc/self/fd/" + pfd.getFd();
+                    ui.post(() -> showFormatPicker(fdPath, pfd, finalType, outDir, finalName, ctx));
+                } catch (IOException e) { /* ignore */ }
+            }
         });
     }
 
-    private void showFormatPicker(String path, String type, String outDir, String fileName, Context ctx) {
-        if (!isAdded()) return;
+    private void showFormatPicker(String path, ParcelFileDescriptor pfd,
+                                   String type, String outDir, String fileName, Context ctx) {
+        if (!isAdded()) { closePfdDirect(pfd); return; }
         String[] items;
         if ("VIDEO".equals(type)) {
             ConversionManager.VideoFormat[] fmts = ConversionManager.VideoFormat.values();
@@ -129,33 +159,36 @@ public class ConvertFragment extends Fragment {
             .setTitle("Format: " + fileName)
             .setSingleChoiceItems(items, 0, (d, which) -> sel[0] = which)
             .setPositiveButton("Convert", (d, w) -> {
-                ConversionTask task = new ConversionTask(ids.incrementAndGet(),path,outDir,type,items[sel[0]],sel[0]);
+                ConversionTask task = new ConversionTask(
+                    ids.incrementAndGet(), path, outDir, type, items[sel[0]], sel[0]);
+                task.displayName = fileName;
+                if (pfd != null) pfdMap.put(task.id, pfd);
                 tasks.add(task);
                 if (b != null) { queueAdapter.notifyItemInserted(tasks.size()-1); refresh(); }
                 startTask(task, ctx);
             })
-            .setNegativeButton("Cancel", null).show();
+            .setNegativeButton("Cancel", (d, w) -> closePfdDirect(pfd))
+            .setOnCancelListener(d -> closePfdDirect(pfd))
+            .show();
     }
 
     private void startTask(ConversionTask task, Context ctx) {
-        task.status = "RUNNING"; safeRefresh();
-        startPoller();
+        task.status = "RUNNING"; safeRefresh(); startPoller();
         updateService(ctx, task, 0);
         ConversionManager.Callback cb = new ConversionManager.Callback() {
             @Override public void onProgress(int pct, String l) {
-                task.progress = pct;
-                updateService(ctx, task, pct);
-            }
+                task.progress = pct; updateService(ctx, task, pct); }
             @Override public void onSuccess(String op, long sz) {
-                task.status = "DONE"; task.outputPath = op; task.outputSize = sz; task.progress = 100;
+                task.status = "DONE"; task.outputPath = op;
+                task.outputSize = sz; task.progress = 100;
+                closePfd(task.id);
                 saveDb(ctx, task);
                 android.media.MediaScannerConnection.scanFile(ctx, new String[]{op}, null, null);
-                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); });
-            }
+                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); }); }
             @Override public void onFailure(String e) {
-                if ("CANCELLED".equals(e)) task.status = "CANCELLED"; else task.status = "FAILED";
-                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); });
-            }
+                task.status = "CANCELLED".equals(e) ? "CANCELLED" : "FAILED";
+                closePfd(task.id);
+                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); }); }
         };
         switch (task.type) {
             case "VIDEO": ConversionManager.convertVideo(ctx,task.id,task.inputPath,task.outputDir,
@@ -165,6 +198,14 @@ public class ConvertFragment extends Fragment {
             case "IMAGE": ConversionManager.convertImage(task.id,task.inputPath,task.outputDir,
                 ConversionManager.ImageFormat.values()[task.formatIndex],cb); break;
         }
+    }
+
+    private void closePfd(int taskId) {
+        ParcelFileDescriptor pfd = pfdMap.remove(taskId);
+        closePfdDirect(pfd);
+    }
+    private void closePfdDirect(ParcelFileDescriptor pfd) {
+        if (pfd != null) try { pfd.close(); } catch (Exception ignored) {}
     }
 
     private void updateService(Context ctx, ConversionTask task, int pct) {
@@ -207,8 +248,8 @@ public class ConvertFragment extends Fragment {
 
     private void saveDb(Context ctx, ConversionTask t) {
         pool.execute(() -> AppDatabase.get(ctx).conversionDao().insert(new ConversionRecord(
-            t.getFileName(),t.inputPath,t.outputPath,t.format,t.type,
-            System.currentTimeMillis(),"SUCCESS",t.outputSize)));
+            t.getFileName(), t.inputPath, t.outputPath, t.format, t.type,
+            System.currentTimeMillis(), "SUCCESS", t.outputSize)));
     }
 
     @Override public void onDestroyView() {
