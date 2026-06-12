@@ -65,7 +65,7 @@ public class MainActivity extends AppCompatActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         int tab = intent.getIntExtra("open_tab", -1);
-        if (tab >= 0) binding.viewPager.setCurrentItem(tab, false);
+        if (tab == 1) b.bottomNav.setSelectedItemId(R.id.nav_convert);
     }
 
 }
