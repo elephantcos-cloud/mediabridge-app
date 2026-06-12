@@ -8,7 +8,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.view.*;
@@ -24,8 +23,7 @@ import com.shohan.mediabridge.db.*;
 import com.shohan.mediabridge.model.ConversionTask;
 import com.shohan.mediabridge.service.ConversionService;
 import com.shohan.mediabridge.utils.FileUtils;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,16 +35,13 @@ public class ConvertFragment extends Fragment {
     private static final AtomicInteger ids = new AtomicInteger(0);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Executors.newCachedThreadPool();
-    private final Map<Integer, ParcelFileDescriptor> pfdMap = new ConcurrentHashMap<>();
     private boolean pollerRunning = false;
 
     private final Runnable progressPoller = new Runnable() {
         @Override public void run() {
-            boolean anyRunning = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
-            if (anyRunning && b != null) {
-                queueAdapter.notifyDataSetChanged();
-                ui.postDelayed(this, 300);
-            } else { pollerRunning = false; }
+            boolean any = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
+            if (any && b != null) { queueAdapter.notifyDataSetChanged(); ui.postDelayed(this, 300); }
+            else pollerRunning = false;
         }
     };
 
@@ -65,11 +60,12 @@ public class ConvertFragment extends Fragment {
 
     @Override public void onViewCreated(@NonNull View v, @Nullable Bundle s) {
         super.onViewCreated(v, s);
+        cleanTempDir(requireContext().getApplicationContext());
         queueAdapter = new QueueAdapter(requireContext(), tasks);
         queueAdapter.setCancelListener(task -> {
             ConversionManager.cancelTask(task.id);
             task.status = "CANCELLED";
-            closePfd(task.id);
+            if (task.isTempFile) deleteSilently(task.inputPath);
             safeRefresh(); stopServiceIfIdle();
         });
         b.queueRecycler.setLayoutManager(new LinearLayoutManager(requireContext()));
@@ -95,8 +91,6 @@ public class ConvertFragment extends Fragment {
         final Context ctx = requireContext().getApplicationContext();
         pool.execute(() -> {
             String fileName = null, mime = null, realPath = null;
-
-            // Query ContentResolver for name, mime, real path
             try (Cursor c = ctx.getContentResolver().query(uri,
                 new String[]{OpenableColumns.DISPLAY_NAME,
                     MediaStore.MediaColumns.MIME_TYPE,
@@ -109,7 +103,6 @@ public class ConvertFragment extends Fragment {
                 }
             } catch (Exception ignored) {}
 
-            // Fallback mime from extension
             if (mime == null && fileName != null) {
                 String e = FileUtils.ext(fileName);
                 if (e.matches("mp4|avi|mkv|mov|3gp|wmv|flv|webm")) mime = "video/mp4";
@@ -117,32 +110,59 @@ public class ConvertFragment extends Fragment {
                 else if (e.matches("jpg|jpeg|png|bmp|gif|webp"))    mime = "image/jpeg";
                 else mime = "";
             }
-
             String type = FileUtils.typeFrom(mime != null ? mime : "");
             if ("UNKNOWN".equals(type)) return;
-            String outDir = FileUtils.getOutputDir(ctx).getAbsolutePath();
-            final String finalName = (fileName != null) ? fileName : "file";
+
+            final String finalName = (fileName != null && !fileName.isEmpty()) ? fileName : "file";
             final String finalType = type;
+            final String outDir = FileUtils.getOutputDir(ctx).getAbsolutePath();
 
             if (realPath != null) {
-                // Best case: use real path directly — no cache, no PFD
+                // Best: use real path directly, no copy at all
                 final String path = realPath;
-                ui.post(() -> showFormatPicker(path, null, finalType, outDir, finalName, ctx));
+                ui.post(() -> showFormatPicker(ctx, path, false, finalType, outDir, finalName));
             } else {
-                // Fallback: use ParcelFileDescriptor — no cache copy
-                try {
-                    ParcelFileDescriptor pfd = ctx.getContentResolver().openFileDescriptor(uri, "r");
-                    if (pfd == null) return;
-                    String fdPath = "/proc/self/fd/" + pfd.getFd();
-                    ui.post(() -> showFormatPicker(fdPath, pfd, finalType, outDir, finalName, ctx));
-                } catch (IOException e) { /* ignore */ }
+                // Copy to temp dir (NOT cache — won't show in Settings > Cache)
+                String tmpPath = copyToTempDir(ctx, uri, finalName);
+                if (tmpPath == null) return;
+                final String path = tmpPath;
+                ui.post(() -> showFormatPicker(ctx, path, true, finalType, outDir, finalName));
             }
         });
     }
 
-    private void showFormatPicker(String path, ParcelFileDescriptor pfd,
-                                   String type, String outDir, String fileName, Context ctx) {
-        if (!isAdded()) { closePfdDirect(pfd); return; }
+    /** Copies file to app's external files temp dir — NOT the cache dir */
+    private String copyToTempDir(Context ctx, Uri uri, String fileName) {
+        File tmpDir = new File(ctx.getExternalFilesDir(null), "mb_tmp");
+        if (!tmpDir.exists()) tmpDir.mkdirs();
+        File out = new File(tmpDir, System.currentTimeMillis() + "_" + fileName);
+        try (InputStream in = ctx.getContentResolver().openInputStream(uri);
+             OutputStream os = new FileOutputStream(out)) {
+            if (in == null) return null;
+            byte[] buf = new byte[16384]; int n;
+            while ((n = in.read(buf)) != -1) os.write(buf, 0, n);
+            return out.getAbsolutePath();
+        } catch (Exception e) { out.delete(); return null; }
+    }
+
+    /** Deletes leftover temp files from previous sessions */
+    private void cleanTempDir(Context ctx) {
+        pool.execute(() -> {
+            File tmpDir = new File(ctx.getExternalFilesDir(null), "mb_tmp");
+            if (tmpDir.exists()) {
+                for (File f : tmpDir.listFiles() != null ? tmpDir.listFiles() : new File[0])
+                    f.delete();
+            }
+        });
+    }
+
+    private void deleteSilently(String path) {
+        pool.execute(() -> new File(path).delete());
+    }
+
+    private void showFormatPicker(Context ctx, String path, boolean isTempFile,
+                                   String type, String outDir, String fileName) {
+        if (!isAdded()) { if (isTempFile) deleteSilently(path); return; }
         String[] items;
         if ("VIDEO".equals(type)) {
             ConversionManager.VideoFormat[] fmts = ConversionManager.VideoFormat.values();
@@ -162,13 +182,13 @@ public class ConvertFragment extends Fragment {
                 ConversionTask task = new ConversionTask(
                     ids.incrementAndGet(), path, outDir, type, items[sel[0]], sel[0]);
                 task.displayName = fileName;
-                if (pfd != null) pfdMap.put(task.id, pfd);
+                task.isTempFile  = isTempFile;
                 tasks.add(task);
                 if (b != null) { queueAdapter.notifyItemInserted(tasks.size()-1); refresh(); }
                 startTask(task, ctx);
             })
-            .setNegativeButton("Cancel", (d, w) -> closePfdDirect(pfd))
-            .setOnCancelListener(d -> closePfdDirect(pfd))
+            .setNegativeButton("Cancel", (d, w) -> { if (isTempFile) deleteSilently(path); })
+            .setOnCancelListener(d ->            { if (isTempFile) deleteSilently(path); })
             .show();
     }
 
@@ -181,13 +201,13 @@ public class ConvertFragment extends Fragment {
             @Override public void onSuccess(String op, long sz) {
                 task.status = "DONE"; task.outputPath = op;
                 task.outputSize = sz; task.progress = 100;
-                closePfd(task.id);
+                if (task.isTempFile) deleteSilently(task.inputPath);
                 saveDb(ctx, task);
                 android.media.MediaScannerConnection.scanFile(ctx, new String[]{op}, null, null);
                 ui.post(() -> { safeRefresh(); stopServiceIfIdle(); }); }
             @Override public void onFailure(String e) {
                 task.status = "CANCELLED".equals(e) ? "CANCELLED" : "FAILED";
-                closePfd(task.id);
+                if (task.isTempFile) deleteSilently(task.inputPath);
                 ui.post(() -> { safeRefresh(); stopServiceIfIdle(); }); }
         };
         switch (task.type) {
@@ -198,14 +218,6 @@ public class ConvertFragment extends Fragment {
             case "IMAGE": ConversionManager.convertImage(task.id,task.inputPath,task.outputDir,
                 ConversionManager.ImageFormat.values()[task.formatIndex],cb); break;
         }
-    }
-
-    private void closePfd(int taskId) {
-        ParcelFileDescriptor pfd = pfdMap.remove(taskId);
-        closePfdDirect(pfd);
-    }
-    private void closePfdDirect(ParcelFileDescriptor pfd) {
-        if (pfd != null) try { pfd.close(); } catch (Exception ignored) {}
     }
 
     private void updateService(Context ctx, ConversionTask task, int pct) {
@@ -221,15 +233,15 @@ public class ConvertFragment extends Fragment {
     }
 
     private void stopServiceIfIdle() {
-        boolean anyRunning = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
-        if (!anyRunning && isAdded()) {
+        boolean any = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
+        if (!any && isAdded()) {
             Intent si = new Intent(requireContext(), ConversionService.class);
             si.setAction(ConversionService.ACTION_STOP);
             requireContext().startService(si);
         }
     }
 
-    private void safeRefresh() { if (b==null) return; queueAdapter.notifyDataSetChanged(); refresh(); }
+    private void safeRefresh() { if(b==null) return; queueAdapter.notifyDataSetChanged(); refresh(); }
 
     private void refresh() {
         if (b == null) return;
