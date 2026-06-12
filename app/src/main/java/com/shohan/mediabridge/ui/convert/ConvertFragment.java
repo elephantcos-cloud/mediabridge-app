@@ -12,7 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.*;
 import androidx.activity.result.*;
-import androidx.activity.result.register.ActivityResultContracts;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.*;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
