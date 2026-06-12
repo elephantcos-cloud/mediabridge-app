@@ -9,25 +9,21 @@
     app:cardCornerRadius="12dp"
     app:cardBackgroundColor="#1E1E1E"
     app:cardElevation="2dp">
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="14dp">
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
-
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:orientation="vertical">
-
                 <TextView
                     android:id="@+id/tv_filename"
                     android:layout_width="match_parent"
@@ -37,7 +33,6 @@
                     android:textSize="14sp"
                     android:ellipsize="end"
                     android:maxLines="1"/>
-
                 <TextView
                     android:id="@+id/tv_format"
                     android:layout_width="match_parent"
@@ -45,9 +40,7 @@
                     android:textColor="#AAAAAA"
                     android:textSize="12sp"
                     android:layout_marginTop="2dp"/>
-
             </LinearLayout>
-
             <ImageButton
                 android:id="@+id/btn_cancel"
                 android:layout_width="36dp"
@@ -57,9 +50,7 @@
                 android:tint="#FF5555"
                 android:visibility="gone"
                 android:contentDescription="Cancel"/>
-
         </LinearLayout>
-
         <ProgressBar
             android:id="@+id/progress_bar"
             style="?android:attr/progressBarStyleHorizontal"
@@ -69,13 +60,23 @@
             android:visibility="gone"
             android:max="100"
             android:progressTint="#9C27B0"/>
-
-        <TextView
-            android:id="@+id/tv_status"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:layout_marginTop="6dp"/>
-
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="6dp">
+            <View
+                android:id="@+id/status_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/dot_shape"/>
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"/>
+        </LinearLayout>
     </LinearLayout>
 </androidx.cardview.widget.CardView>

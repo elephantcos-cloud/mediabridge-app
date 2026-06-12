@@ -1,12 +1,9 @@
 package com.shohan.mediabridge.ui.convert;
 import android.app.AlertDialog;
 import android.app.Activity;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -36,6 +33,20 @@ public class ConvertFragment extends Fragment {
     private static final AtomicInteger ids = new AtomicInteger(0);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    private boolean pollerRunning = false;
+
+    // Real-time UI refresh every 300ms while converting
+    private final Runnable progressPoller = new Runnable() {
+        @Override public void run() {
+            boolean anyRunning = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
+            if (anyRunning && b != null) {
+                queueAdapter.notifyDataSetChanged();
+                ui.postDelayed(this, 300);
+            } else {
+                pollerRunning = false;
+            }
+        }
+    };
 
     private final ActivityResultLauncher<Intent> picker =
         registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), r -> {
@@ -56,19 +67,27 @@ public class ConvertFragment extends Fragment {
         queueAdapter.setCancelListener(task -> {
             ConversionManager.cancelTask(task.id);
             task.status = "CANCELLED";
-            safeRefresh();
-            stopServiceIfIdle();
+            safeRefresh(); stopServiceIfIdle();
         });
         b.queueRecycler.setLayoutManager(new LinearLayoutManager(requireContext()));
         b.queueRecycler.setAdapter(queueAdapter);
         b.btnPickFile.setOnClickListener(x -> pick());
         b.btnClearDone.setOnClickListener(x -> clearDone());
+        // Resume poller if tasks are still running (e.g. after fragment recreated)
+        if (tasks.stream().anyMatch(t -> "RUNNING".equals(t.status))) startPoller();
         refresh();
+    }
+
+    private void startPoller() {
+        if (!pollerRunning) {
+            pollerRunning = true;
+            ui.postDelayed(progressPoller, 300);
+        }
     }
 
     private void pick() {
         Intent i = new Intent(Intent.ACTION_GET_CONTENT); i.setType("*/*");
-        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"video/*", "audio/*", "image/*"});
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"video/*","audio/*","image/*"});
         i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); i.addCategory(Intent.CATEGORY_OPENABLE);
         picker.launch(Intent.createChooser(i, "Select files"));
     }
@@ -97,20 +116,20 @@ public class ConvertFragment extends Fragment {
         String[] items;
         if ("VIDEO".equals(type)) {
             ConversionManager.VideoFormat[] fmts = ConversionManager.VideoFormat.values();
-            items = new String[fmts.length]; for (int i = 0; i < fmts.length; i++) items[i] = fmts[i].label;
+            items = new String[fmts.length]; for (int i=0;i<fmts.length;i++) items[i]=fmts[i].label;
         } else if ("AUDIO".equals(type)) {
             ConversionManager.AudioFormat[] fmts = ConversionManager.AudioFormat.values();
-            items = new String[fmts.length]; for (int i = 0; i < fmts.length; i++) items[i] = fmts[i].label;
+            items = new String[fmts.length]; for (int i=0;i<fmts.length;i++) items[i]=fmts[i].label;
         } else {
             ConversionManager.ImageFormat[] fmts = ConversionManager.ImageFormat.values();
-            items = new String[fmts.length]; for (int i = 0; i < fmts.length; i++) items[i] = fmts[i].label;
+            items = new String[fmts.length]; for (int i=0;i<fmts.length;i++) items[i]=fmts[i].label;
         }
         final int[] sel = {0};
         new AlertDialog.Builder(requireContext())
             .setTitle("Format: " + fileName)
             .setSingleChoiceItems(items, 0, (d, which) -> sel[0] = which)
             .setPositiveButton("Convert", (d, w) -> {
-                ConversionTask task = new ConversionTask(ids.incrementAndGet(), path, outDir, type, items[sel[0]], sel[0]);
+                ConversionTask task = new ConversionTask(ids.incrementAndGet(),path,outDir,type,items[sel[0]],sel[0]);
                 tasks.add(task);
                 if (b != null) { queueAdapter.notifyItemInserted(tasks.size()-1); refresh(); }
                 startTask(task, ctx);
@@ -120,11 +139,12 @@ public class ConvertFragment extends Fragment {
 
     private void startTask(ConversionTask task, Context ctx) {
         task.status = "RUNNING"; safeRefresh();
+        startPoller();
         updateService(ctx, task, 0);
         ConversionManager.Callback cb = new ConversionManager.Callback() {
             @Override public void onProgress(int pct, String l) {
                 task.progress = pct;
-                ui.post(() -> { safeRefresh(); updateService(ctx, task, pct); });
+                updateService(ctx, task, pct);
             }
             @Override public void onSuccess(String op, long sz) {
                 task.status = "DONE"; task.outputPath = op; task.outputSize = sz; task.progress = 100;
@@ -138,12 +158,12 @@ public class ConvertFragment extends Fragment {
             }
         };
         switch (task.type) {
-            case "VIDEO": ConversionManager.convertVideo(ctx, task.id, task.inputPath, task.outputDir,
-                ConversionManager.VideoFormat.values()[task.formatIndex], cb); break;
-            case "AUDIO": ConversionManager.convertAudio(ctx, task.id, task.inputPath, task.outputDir,
-                ConversionManager.AudioFormat.values()[task.formatIndex], cb); break;
-            case "IMAGE": ConversionManager.convertImage(task.id, task.inputPath, task.outputDir,
-                ConversionManager.ImageFormat.values()[task.formatIndex], cb); break;
+            case "VIDEO": ConversionManager.convertVideo(ctx,task.id,task.inputPath,task.outputDir,
+                ConversionManager.VideoFormat.values()[task.formatIndex],cb); break;
+            case "AUDIO": ConversionManager.convertAudio(ctx,task.id,task.inputPath,task.outputDir,
+                ConversionManager.AudioFormat.values()[task.formatIndex],cb); break;
+            case "IMAGE": ConversionManager.convertImage(task.id,task.inputPath,task.outputDir,
+                ConversionManager.ImageFormat.values()[task.formatIndex],cb); break;
         }
     }
 
@@ -154,7 +174,7 @@ public class ConvertFragment extends Fragment {
         si.setAction(ConversionService.ACTION_UPDATE);
         si.putExtra(ConversionService.EXTRA_FILENAME, task.getFileName());
         si.putExtra(ConversionService.EXTRA_PROGRESS, pct);
-        si.putExtra(ConversionService.EXTRA_TOTAL, (int)(running));
+        si.putExtra(ConversionService.EXTRA_TOTAL, (int) running);
         si.putExtra("done", (int) done);
         ContextCompat.startForegroundService(ctx, si);
     }
@@ -168,7 +188,7 @@ public class ConvertFragment extends Fragment {
         }
     }
 
-    private void safeRefresh() { if (b == null) return; queueAdapter.notifyDataSetChanged(); refresh(); }
+    private void safeRefresh() { if (b==null) return; queueAdapter.notifyDataSetChanged(); refresh(); }
 
     private void refresh() {
         if (b == null) return;
@@ -176,20 +196,24 @@ public class ConvertFragment extends Fragment {
         long w = tasks.stream().filter(t -> "WAITING".equals(t.status)).count();
         long d = tasks.stream().filter(t -> "DONE".equals(t.status)).count();
         b.tvStatus.setText(tasks.isEmpty() ? "Pick files to convert." :
-            r + " converting \u2022 " + w + " waiting \u2022 " + d + " done");
+            r + " converting  " + w + " waiting  " + d + " done");
     }
 
     private void clearDone() {
-        tasks.removeIf(t -> "DONE".equals(t.status) || "FAILED".equals(t.status) || "CANCELLED".equals(t.status));
+        tasks.removeIf(t -> "DONE".equals(t.status)||"FAILED".equals(t.status)||"CANCELLED".equals(t.status));
         if (b != null) { queueAdapter.notifyDataSetChanged(); refresh(); }
         stopServiceIfIdle();
     }
 
     private void saveDb(Context ctx, ConversionTask t) {
         pool.execute(() -> AppDatabase.get(ctx).conversionDao().insert(new ConversionRecord(
-            t.getFileName(), t.inputPath, t.outputPath, t.format, t.type,
-            System.currentTimeMillis(), "SUCCESS", t.outputSize)));
+            t.getFileName(),t.inputPath,t.outputPath,t.format,t.type,
+            System.currentTimeMillis(),"SUCCESS",t.outputSize)));
     }
 
-    @Override public void onDestroyView() { super.onDestroyView(); b = null; }
+    @Override public void onDestroyView() {
+        super.onDestroyView();
+        ui.removeCallbacks(progressPoller);
+        b = null;
+    }
 }

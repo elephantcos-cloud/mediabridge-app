@@ -72,16 +72,29 @@ public class ConversionManager {
             mmr.release();
         } catch (Exception ignored) {}
         final long total = totalMs;
-        String cmd = "-y -i \"" + in + "\" -vcodec " + fmt.codec +
-            " -s " + fmt.w + "x" + fmt.h +
-            " -r 15 -b:v 128k -acodec aac -ar 22050 -ac 1 -b:a 32k \"" + out + "\"";
+
+        // Build FFmpeg command — force scale + safe audio mapping
+        String cmd = "-y -i \"" + in + "\"" +
+            " -vf scale=" + fmt.w + ":" + fmt.h + ":force_original_aspect_ratio=decrease,pad=" + fmt.w + ":" + fmt.h + ":(ow-iw)/2:(oh-ih)/2" +
+            " -vcodec " + fmt.codec +
+            " -r 15 -b:v 128k" +
+            " -acodec aac -ar 22050 -ac 1 -b:a 32k" +
+            " -map_metadata -1" +
+            " \"" + out + "\"";
+
         FFmpegSession session = FFmpegKit.executeAsync(cmd,
             s -> {
                 sessionMap.remove(taskId);
                 ReturnCode rc = s.getReturnCode();
-                if (ReturnCode.isSuccess(rc)) cb.onSuccess(out, new File(out).length());
-                else if (ReturnCode.isCancel(rc)) cb.onFailure("CANCELLED");
-                else cb.onFailure("3GP conversion failed");
+                // Delete cache input file
+                new File(in).delete();
+                if (ReturnCode.isSuccess(rc)) {
+                    cb.onSuccess(out, new File(out).length());
+                } else if (ReturnCode.isCancel(rc)) {
+                    cb.onFailure("CANCELLED");
+                } else {
+                    cb.onFailure("Conversion failed");
+                }
             },
             log -> {},
             stats -> {
@@ -105,8 +118,12 @@ public class ConversionManager {
             .setTransformationRequest(new TransformationRequest.Builder()
                 .setAudioMimeType(MimeTypes.AUDIO_AAC).build())
             .addListener(new Transformer.Listener() {
-                @Override public void onCompleted(Composition c, ExportResult r) { cb.onSuccess(out, new File(out).length()); }
-                @Override public void onError(Composition c, ExportResult r, ExportException e) { cb.onFailure(e.getMessage() != null ? e.getMessage() : "Audio failed"); }
+                @Override public void onCompleted(Composition c, ExportResult r) {
+                    new File(in).delete();
+                    cb.onSuccess(out, new File(out).length()); }
+                @Override public void onError(Composition c, ExportResult r, ExportException e) {
+                    new File(in).delete();
+                    cb.onFailure(e.getMessage() != null ? e.getMessage() : "Audio failed"); }
             }).build();
         activeTransformer = t;
         t.start(new EditedMediaItem.Builder(
@@ -123,19 +140,24 @@ public class ConversionManager {
                 o.inSampleSize = ss(o.outWidth, o.outHeight, fmt.w, fmt.h);
                 o.inJustDecodeBounds = false;
                 Bitmap bmp = BitmapFactory.decodeFile(in, o);
-                if (bmp == null) { cb.onFailure("Cannot decode image"); return; }
+                if (bmp == null) { new File(in).delete(); cb.onFailure("Cannot decode image"); return; }
                 Bitmap sc = Bitmap.createScaledBitmap(bmp, fmt.w, fmt.h, true); bmp.recycle();
                 try (FileOutputStream fos = new FileOutputStream(out)) {
                     sc.compress(Bitmap.CompressFormat.JPEG, 85, fos);
                 }
-                sc.recycle(); cb.onSuccess(out, new File(out).length());
-            } catch (Exception e) { cb.onFailure("Image error: " + e.getMessage()); }
+                sc.recycle();
+                new File(in).delete();
+                cb.onSuccess(out, new File(out).length());
+            } catch (Exception e) {
+                new File(in).delete();
+                cb.onFailure("Image error: " + e.getMessage());
+            }
         }).start();
     }
 
     private static int ss(int iw, int ih, int tw, int th) {
         int s = 1;
-        if (iw > tw || ih > th) { int hw = iw/2, hh = ih/2; while (hw/s >= tw && hh/s >= th) s *= 2; }
+        if (iw > tw || ih > th) { int hw=iw/2, hh=ih/2; while(hw/s>=tw&&hh/s>=th) s*=2; }
         return s;
     }
 
