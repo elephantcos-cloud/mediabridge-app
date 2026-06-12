@@ -59,4 +59,13 @@ public class MainActivity extends AppCompatActivity {
             else Toast.makeText(this,"Storage permission required to browse media",Toast.LENGTH_LONG).show();
         }
     }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        int tab = intent.getIntExtra("open_tab", -1);
+        if (tab >= 0) binding.viewPager.setCurrentItem(tab, false);
+    }
+
 }

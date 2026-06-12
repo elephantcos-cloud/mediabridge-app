@@ -14,8 +14,7 @@ import android.view.*;
 import androidx.activity.result.*;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.*;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import com.shohan.mediabridge.R;
@@ -23,6 +22,7 @@ import com.shohan.mediabridge.converter.ConversionManager;
 import com.shohan.mediabridge.databinding.FragmentConvertBinding;
 import com.shohan.mediabridge.db.*;
 import com.shohan.mediabridge.model.ConversionTask;
+import com.shohan.mediabridge.service.ConversionService;
 import com.shohan.mediabridge.utils.FileUtils;
 import java.io.File;
 import java.util.*;
@@ -36,8 +36,6 @@ public class ConvertFragment extends Fragment {
     private static final AtomicInteger ids = new AtomicInteger(0);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Executors.newCachedThreadPool();
-    private static final String CH = "mb_convert";
-    private static final int BNID = 3000;
 
     private final ActivityResultLauncher<Intent> picker =
         registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), r -> {
@@ -53,12 +51,13 @@ public class ConvertFragment extends Fragment {
     }
 
     @Override public void onViewCreated(@NonNull View v, @Nullable Bundle s) {
-        super.onViewCreated(v, s); createCh();
+        super.onViewCreated(v, s);
         queueAdapter = new QueueAdapter(requireContext(), tasks);
         queueAdapter.setCancelListener(task -> {
             ConversionManager.cancelTask(task.id);
             task.status = "CANCELLED";
             safeRefresh();
+            stopServiceIfIdle();
         });
         b.queueRecycler.setLayoutManager(new LinearLayoutManager(requireContext()));
         b.queueRecycler.setAdapter(queueAdapter);
@@ -120,18 +119,23 @@ public class ConvertFragment extends Fragment {
     }
 
     private void startTask(ConversionTask task, Context ctx) {
-        task.status = "RUNNING"; int nid = BNID + task.id; safeRefresh();
+        task.status = "RUNNING"; safeRefresh();
+        updateService(ctx, task, 0);
         ConversionManager.Callback cb = new ConversionManager.Callback() {
-            @Override public void onProgress(int pct, String l) { task.progress = pct;
-                ui.post(() -> { safeRefresh(); notif(ctx, nid, task.getFileName(), pct, false); }); }
+            @Override public void onProgress(int pct, String l) {
+                task.progress = pct;
+                ui.post(() -> { safeRefresh(); updateService(ctx, task, pct); });
+            }
             @Override public void onSuccess(String op, long sz) {
                 task.status = "DONE"; task.outputPath = op; task.outputSize = sz; task.progress = 100;
                 saveDb(ctx, task);
                 android.media.MediaScannerConnection.scanFile(ctx, new String[]{op}, null, null);
-                ui.post(() -> { safeRefresh(); notif(ctx, nid, "Done: " + task.getFileName(), 100, true); }); }
+                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); });
+            }
             @Override public void onFailure(String e) {
                 if ("CANCELLED".equals(e)) task.status = "CANCELLED"; else task.status = "FAILED";
-                ui.post(() -> { safeRefresh(); NotificationManagerCompat.from(ctx).cancel(nid); }); }
+                ui.post(() -> { safeRefresh(); stopServiceIfIdle(); });
+            }
         };
         switch (task.type) {
             case "VIDEO": ConversionManager.convertVideo(ctx, task.id, task.inputPath, task.outputDir,
@@ -140,6 +144,27 @@ public class ConvertFragment extends Fragment {
                 ConversionManager.AudioFormat.values()[task.formatIndex], cb); break;
             case "IMAGE": ConversionManager.convertImage(task.id, task.inputPath, task.outputDir,
                 ConversionManager.ImageFormat.values()[task.formatIndex], cb); break;
+        }
+    }
+
+    private void updateService(Context ctx, ConversionTask task, int pct) {
+        long running = tasks.stream().filter(t -> "RUNNING".equals(t.status)).count();
+        long done    = tasks.stream().filter(t -> "DONE".equals(t.status)).count();
+        Intent si = new Intent(ctx, ConversionService.class);
+        si.setAction(ConversionService.ACTION_UPDATE);
+        si.putExtra(ConversionService.EXTRA_FILENAME, task.getFileName());
+        si.putExtra(ConversionService.EXTRA_PROGRESS, pct);
+        si.putExtra(ConversionService.EXTRA_TOTAL, (int)(running));
+        si.putExtra("done", (int) done);
+        ContextCompat.startForegroundService(ctx, si);
+    }
+
+    private void stopServiceIfIdle() {
+        boolean anyRunning = tasks.stream().anyMatch(t -> "RUNNING".equals(t.status));
+        if (!anyRunning && isAdded()) {
+            Intent si = new Intent(requireContext(), ConversionService.class);
+            si.setAction(ConversionService.ACTION_STOP);
+            requireContext().startService(si);
         }
     }
 
@@ -157,24 +182,7 @@ public class ConvertFragment extends Fragment {
     private void clearDone() {
         tasks.removeIf(t -> "DONE".equals(t.status) || "FAILED".equals(t.status) || "CANCELLED".equals(t.status));
         if (b != null) { queueAdapter.notifyDataSetChanged(); refresh(); }
-    }
-
-    private void notif(Context ctx, int id, String txt, int pct, boolean done) {
-        try { NotificationCompat.Builder n = new NotificationCompat.Builder(ctx, CH)
-                .setSmallIcon(R.drawable.ic_convert).setContentTitle("MediaBridge")
-                .setContentText(txt).setSilent(true).setOnlyAlertOnce(true)
-                .setProgress(100, pct, pct == 0 && !done);
-            if (done) n.setAutoCancel(true).setOngoing(false); else n.setOngoing(true);
-            NotificationManagerCompat.from(ctx).notify(id, n.build());
-        } catch (Exception ignored) {}
-    }
-
-    private void createCh() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel c = new NotificationChannel(CH, "Conversion", NotificationManager.IMPORTANCE_LOW);
-            c.setSound(null, null);
-            ((NotificationManager) requireContext().getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(c);
-        }
+        stopServiceIfIdle();
     }
 
     private void saveDb(Context ctx, ConversionTask t) {
