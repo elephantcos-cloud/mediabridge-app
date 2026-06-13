@@ -114,12 +114,12 @@ public class ConvertFragment extends Fragment {
                         ParcelFileDescriptor pfd=ctx.getContentResolver().openFileDescriptor(uri,"r");
                         if(pfd==null)return;
                         // Try to resolve symlink to real path
-                        String resolved=new File("/proc/self/fd/"+pfd.getFd()).getCanonicalPath();
+                        final String resolved=new File("/proc/self/fd/"+pfd.getFd()).getCanonicalPath();
                         if(!resolved.startsWith("/proc")&&new File(resolved).exists()){
                             pfd.close();
                             ui.post(()->showFormatPicker(ctx,resolved,null,finalType,outDir,finalName,uriStr));
                         }else{
-                            String fdPath="/proc/self/fd/"+pfd.getFd();
+                            final String fdPath="/proc/self/fd/"+pfd.getFd();
                             ui.post(()->showFormatPicker(ctx,fdPath,pfd,finalType,outDir,finalName,uriStr));
                         }
                     }catch(Exception e){return;}
