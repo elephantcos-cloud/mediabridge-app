@@ -29,7 +29,7 @@ public class QueueAdapter extends RecyclerView.Adapter<QueueAdapter.VH> {
 
     @Override public void onBindViewHolder(@NonNull VH h, int pos) {
         ConversionTask t = tasks.get(pos);
-        h.tvFilename.setText(new File(t.inputPath).getName());
+        h.tvFilename.setText(t.getFileName());
         h.tvFormat.setText(t.type + " -> " + t.format);
         switch (t.status) {
             case "RUNNING":

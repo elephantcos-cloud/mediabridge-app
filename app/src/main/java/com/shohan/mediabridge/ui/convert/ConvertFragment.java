@@ -227,7 +227,8 @@ public class ConvertFragment extends Fragment {
         si.setAction(ConversionService.ACTION_UPDATE);
         si.putExtra(ConversionService.EXTRA_FILENAME, task.getFileName());
         si.putExtra(ConversionService.EXTRA_PROGRESS, pct);
-        si.putExtra(ConversionService.EXTRA_TOTAL, (int) running);
+        long total = tasks.size();
+        si.putExtra(ConversionService.EXTRA_TOTAL, (int) total);
         si.putExtra("done", (int) done);
         ContextCompat.startForegroundService(ctx, si);
     }
