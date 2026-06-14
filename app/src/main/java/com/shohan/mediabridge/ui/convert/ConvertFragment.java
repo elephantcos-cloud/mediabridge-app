@@ -105,10 +105,11 @@ public class ConvertFragment extends Fragment {
             final String uriStr=uri.toString();
             final String outDir=FileUtils.getOutputDir(ctx).getAbsolutePath();
 
+            final String finalRealPath=realPath;
             if("VIDEO".equals(type)){
                 // VIDEO: try real path, else PFD fd path
                 if(realPath!=null){
-                    ui.post(()->showFormatPicker(ctx,realPath,null,finalType,outDir,finalName,uriStr));
+                    ui.post(()->showFormatPicker(ctx,finalRealPath,null,finalType,outDir,finalName,uriStr));
                 }else{
                     try{
                         ParcelFileDescriptor pfd=ctx.getContentResolver().openFileDescriptor(uri,"r");
@@ -135,7 +136,8 @@ public class ConvertFragment extends Fragment {
                                    String type,String outDir,String fileName,String uriStr){
         if(!isAdded()){if(pfd!=null)try{pfd.close();}catch(Exception ignored){}return;}
         String[] items;
-        if("VIDEO".equals(type)){
+        final String finalRealPath=realPath;
+            if("VIDEO".equals(type)){
             ConversionManager.VideoFormat[] fmts=ConversionManager.VideoFormat.values();
             items=new String[fmts.length];for(int i=0;i<fmts.length;i++)items[i]=fmts[i].label;
         }else if("AUDIO".equals(type)){
